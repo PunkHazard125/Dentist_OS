@@ -8,6 +8,7 @@ pthread_mutex_t dentist_mutex;
 pthread_mutex_t appointment_mutex;
 pthread_mutex_t walkin_mutex;
 pthread_mutex_t finished_mutex;
+pthread_mutex_t caller_mutex;
 
 sem_t dentist_sem;
 sem_t appointment_sem;
@@ -22,6 +23,7 @@ int free_chairs;
 int MAX_APPOINTMENTS;
 int appointment_count = 0;
 int dentist_state = 0;
+int caller_id;
 
 int* walkin_queue;
 int* appointment_queue;
@@ -86,7 +88,7 @@ void* dentist(void* arg) {
             int id = dequeue(appointment_queue, &appointment_rear);
             pthread_mutex_unlock(&appointment_mutex);
 
-            usleep((rand() % 1000 + 1000) * 1000);
+            usleep((rand() % 1500 + 1000) * 1000);
             printf("Patient %d has been treated\n", id + 1);
             sem_post(&patient_sems[id]);
 
@@ -105,7 +107,7 @@ void* dentist(void* arg) {
             int id = dequeue(walkin_queue, &walkin_rear);
             pthread_mutex_unlock(&walkin_mutex);
 
-            usleep((rand() % 1000 + 1000) * 1000);
+            usleep((rand() % 1500 + 1000) * 1000);
             printf("Patient %d has been treated\n", id + 1);
             sem_post(&patient_sems[id]);
 
@@ -122,6 +124,20 @@ void* dentist(void* arg) {
 
 void* receptionist(void* arg) {
 
+    while (patients_finished < total_patients)
+    {
+        sem_wait(&receptionist_sem);
+
+        pthread_mutex_lock(&caller_mutex);
+        int patient_id = caller_id;
+        pthread_mutex_unlock(&caller_mutex);
+
+        printf("Receptionist is checking if appointment is possible for Patient %d...\n", patient_id + 1);
+        usleep((rand() % 4000 + 1000) * 1000);
+
+        sem_post(&patient_sems[patient_id]);
+    }
+
     return NULL;
 
 }
@@ -129,6 +145,8 @@ void* receptionist(void* arg) {
 void* walkin_patient(void* arg) {
 
     int id = (int)(long)arg;
+
+    usleep((rand() % 2000) * 1000);
     printf("Patient %d has arrived at the clinic\n", id + 1);
 
     pthread_mutex_lock(&dentist_mutex);
@@ -170,6 +188,62 @@ void* walkin_patient(void* arg) {
 }
 
 void* appointment_patient(void* arg) {
+
+    int id = (int)(long)arg;
+
+    pthread_mutex_lock(&caller_mutex);
+    caller_id = id;
+    pthread_mutex_unlock(&caller_mutex);
+    printf("Patient %d is calling the receptionist for an appointment...\n", id + 1);
+    sem_post(&receptionist_sem);
+
+    sem_wait(&patient_sems[id]);
+
+    pthread_mutex_lock(&appointment_mutex);
+
+    if (appointment_count < MAX_APPOINTMENTS)
+    {
+        appointment_count++;
+        pthread_mutex_unlock(&appointment_mutex);
+
+        printf("Patient %d has made an appointment\n", id + 1);
+    }
+    else
+    {
+        printf("Patient %d failed to make an appointment\n", id + 1);
+
+        pthread_mutex_unlock(&appointment_mutex);
+        return NULL;
+    }
+    
+    usleep((rand() % 3000 + 1000) * 1000);
+    printf("Patient %d has arrived at the clinic\n", id + 1);
+
+    pthread_mutex_lock(&dentist_mutex);
+
+    if (dentist_state == 0)
+    {
+        sem_post(&dentist_sem);
+        dentist_state = 1;
+    }
+
+    pthread_mutex_unlock(&dentist_mutex);
+
+    pthread_mutex_lock(&appointment_mutex);
+    enqueue(id, appointment_queue, MAX_APPOINTMENTS, &appointment_rear);
+    pthread_mutex_unlock(&appointment_mutex);
+
+    sem_wait(&patient_sems[id]);
+
+    pthread_mutex_lock(&appointment_mutex);
+    appointment_count--;
+    pthread_mutex_unlock(&appointment_mutex);
+    
+    pthread_mutex_lock(&finished_mutex);
+    patients_finished++;
+    pthread_mutex_unlock(&finished_mutex);
+
+    printf("Patient %d has left the clinic after treatment\n", id + 1);
 
     return NULL;
 
