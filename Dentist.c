@@ -124,13 +124,25 @@ void* dentist(void* arg) {
 
 void* receptionist(void* arg) {
 
-    while (patients_finished < total_patients)
+    while (1)
     {
         sem_wait(&receptionist_sem);
 
         pthread_mutex_lock(&caller_mutex);
         int patient_id = caller_id;
         pthread_mutex_unlock(&caller_mutex);
+
+        if (patient_id == -1)
+        {
+            if (patients_finished < total_patients)
+            {
+                continue;
+            }
+            else
+            {
+                break;
+            }
+        }
 
         printf("Receptionist is checking if appointment is possible for Patient %d...\n", patient_id + 1);
         usleep((rand() % 4000 + 1000) * 1000);
@@ -163,11 +175,17 @@ void* walkin_patient(void* arg) {
 
     if (walkin_rear == total_chairs)
     {
+        pthread_mutex_unlock(&walkin_mutex);
+
         pthread_mutex_lock(&finished_mutex);
         patients_finished++;
         pthread_mutex_unlock(&finished_mutex);
 
-        pthread_mutex_unlock(&walkin_mutex);
+        pthread_mutex_lock(&caller_mutex);
+        caller_id = -1;
+        pthread_mutex_unlock(&caller_mutex);
+        sem_post(&receptionist_sem);
+
         printf("Patient %d has left the clinic without treatment\n", id + 1);
         return NULL;
     }
@@ -180,6 +198,11 @@ void* walkin_patient(void* arg) {
     pthread_mutex_lock(&finished_mutex);
     patients_finished++;
     pthread_mutex_unlock(&finished_mutex);
+
+    pthread_mutex_lock(&caller_mutex);
+    caller_id = -1;
+    pthread_mutex_unlock(&caller_mutex);
+    sem_post(&receptionist_sem);
 
     printf("Patient %d has left the clinic after treatment\n", id + 1);
 
@@ -210,9 +233,18 @@ void* appointment_patient(void* arg) {
     }
     else
     {
+        pthread_mutex_unlock(&appointment_mutex);
         printf("Patient %d failed to make an appointment\n", id + 1);
 
-        pthread_mutex_unlock(&appointment_mutex);
+        pthread_mutex_lock(&finished_mutex);
+        patients_finished++;
+        pthread_mutex_unlock(&finished_mutex);
+
+        pthread_mutex_lock(&caller_mutex);
+        caller_id = -1;
+        pthread_mutex_unlock(&caller_mutex);
+        sem_post(&receptionist_sem);
+
         return NULL;
     }
     
@@ -242,6 +274,10 @@ void* appointment_patient(void* arg) {
     pthread_mutex_lock(&finished_mutex);
     patients_finished++;
     pthread_mutex_unlock(&finished_mutex);
+
+    pthread_mutex_lock(&caller_mutex);
+    caller_id = -1;
+    pthread_mutex_unlock(&caller_mutex);
 
     printf("Patient %d has left the clinic after treatment\n", id + 1);
 
